@@ -1,0 +1,14 @@
+{
+  "name": "ai-platform-pro",
+  "version": "1.0.0",
+  "description": "AI Platform Pro",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3"
+  }
+}
