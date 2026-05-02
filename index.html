@@ -4,18 +4,23 @@
   <title>AI Platform Pro</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <!-- PWA -->
   <link rel="manifest" href="manifest.json">
 
   <style>
     body { margin:0; font-family:Arial; background:#111; color:white; }
-    header { background:#000; padding:15px; text-align:center; font-size:20px; }
+
+    header {
+      background:#000;
+      padding:15px;
+      text-align:center;
+      font-size:20px;
+    }
 
     #chat {
       max-width:800px;
       margin:auto;
       padding:10px;
-      height:65vh;
+      height:60vh;
       overflow-y:auto;
     }
 
@@ -33,10 +38,10 @@
     }
 
     input {
-      width:55%;
       padding:10px;
       border-radius:6px;
       border:none;
+      margin:5px;
     }
 
     button {
@@ -52,6 +57,12 @@
 
 <header>🤖 AI Platform Pro</header>
 
+<!-- NAME INPUT -->
+<div style="text-align:center; margin:10px;">
+  <input id="username" placeholder="Enter your name">
+  <button onclick="saveName()">Save Name</button>
+</div>
+
 <div id="chat"></div>
 
 <div id="controls">
@@ -62,8 +73,16 @@
 </div>
 
 <script>
+
+// ===== CONFIG =====
 const API_URL = "/ai";
+
+// ===== USER NAME =====
+let userName = localStorage.getItem("userName") || "";
+
+// ===== MEMORY =====
 let memory = JSON.parse(localStorage.getItem("chatMemory") || "[]");
+
 const chat = document.getElementById("chat");
 
 // ===== RENDER =====
@@ -84,8 +103,19 @@ function save(){
   localStorage.setItem("chatMemory", JSON.stringify(memory));
 }
 
-// ===== TYPEWRITER EFFECT =====
-function typeWriter(text, callback){
+// ===== SAVE NAME =====
+function saveName(){
+  const nameInput = document.getElementById("username").value.trim();
+  if(!nameInput) return;
+
+  userName = nameInput;
+  localStorage.setItem("userName", userName);
+
+  alert("Name saved: " + userName);
+}
+
+// ===== TYPEWRITER =====
+function typeWriter(text, done){
   let i = 0;
   let current = "";
 
@@ -100,7 +130,7 @@ function typeWriter(text, callback){
       i++;
       setTimeout(typing, 15);
     } else {
-      callback();
+      done();
     }
   }
 
@@ -113,7 +143,7 @@ async function send(textOverride){
   const text = textOverride || input.value.trim();
   if(!text) return;
 
-  memory.push({text:"You: "+text, type:"user"});
+  memory.push({text:"You: " + text, type:"user"});
   input.value="";
   render();
   save();
@@ -122,21 +152,31 @@ async function send(textOverride){
     const res = await fetch(API_URL,{
       method:"POST",
       headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({prompt:text})
+      body: JSON.stringify({
+        prompt: userName
+          ? `User name is ${userName}. Respond to: ${text}`
+          : text
+      })
     });
 
     const data = await res.json();
-    const reply = data.result || "No response";
+
+    let reply = data.result || "No response";
+
+    // 👉 ADD NAME INTO RESPONSE
+    if(userName && !reply.includes(userName)){
+      reply = reply + " " + userName;
+    }
 
     typeWriter(reply, ()=>{
-      memory.push({text:"AI: "+reply, type:"ai"});
+      memory.push({text:"AI: " + reply, type:"ai"});
       save();
     });
 
     speak(reply);
 
-  }catch(e){
-    memory.push({text:"Error: "+e.message, type:"ai"});
+  }catch(err){
+    memory.push({text:"Error: " + err.message, type:"ai"});
     render();
   }
 }
@@ -192,9 +232,13 @@ window.addEventListener("beforeinstallprompt", (e)=>{
 
   document.body.appendChild(btn);
 });
-</script>
+
+// ===== SERVICE WORKER =====
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js");
 }
+
+</script>
+
 </body>
 </html>
