@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
+const fs = require("fs");
 
 require("dotenv").config();
 
@@ -10,9 +11,21 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ===== SUPABASE CONFIG =====
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_KEY;
+// ===== FILE DATABASE =====
+const DB_FILE = "memory.json";
+
+// load memory file
+function loadDB() {
+  if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, JSON.stringify([]));
+  }
+  return JSON.parse(fs.readFileSync(DB_FILE));
+}
+
+// save memory file
+function saveDB(data) {
+  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
+}
 
 // ===== FRONTEND =====
 app.get("/", (req, res) => {
@@ -38,7 +51,7 @@ app.post("/ai", async (req, res) => {
           {
             role: "system",
             content: userName
-              ? `The user's name is ${userName}. Speak naturally and remember them.`
+              ? `The user's name is ${userName}. Remember them.`
               : "You are a helpful assistant."
           },
           { role: "user", content: prompt }
@@ -49,22 +62,17 @@ app.post("/ai", async (req, res) => {
     const data = await aiRes.json();
     const reply = data.choices?.[0]?.message?.content || "No response";
 
-    // ===== SAVE TO SUPABASE =====
-    if (SUPABASE_URL && SUPABASE_KEY) {
-      await fetch(`${SUPABASE_URL}/rest/v1/chats`, {
-        method: "POST",
-        headers: {
-          "apikey": SUPABASE_KEY,
-          "Authorization": `Bearer ${SUPABASE_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          user_name: userName || "guest",
-          message: prompt,
-          reply: reply
-        })
-      });
-    }
+    // ===== SAVE TO FILE =====
+    const db = loadDB();
+
+    db.push({
+      user_name: userName || "guest",
+      message: prompt,
+      reply: reply,
+      time: new Date()
+    });
+
+    saveDB(db);
 
     res.json({ result: reply });
 
@@ -75,27 +83,14 @@ app.post("/ai", async (req, res) => {
 });
 
 // ===== LOAD MEMORY =====
-app.get("/memory/:name", async (req, res) => {
-  try {
-    const name = req.params.name;
+app.get("/memory/:name", (req, res) => {
+  const name = req.params.name;
 
-    const response = await fetch(
-      `${process.env.SUPABASE_URL}/rest/v1/chats?user_name=eq.${name}&order=created_at.desc&limit=10`,
-      {
-        headers: {
-          "apikey": process.env.SUPABASE_KEY,
-          "Authorization": `Bearer ${process.env.SUPABASE_KEY}`
-        }
-      }
-    );
+  const db = loadDB();
 
-    const data = await response.json();
+  const userData = db.filter(item => item.user_name === name);
 
-    res.json(data);
-
-  } catch (err) {
-    res.status(500).json({ error: "Memory load error" });
-  }
+  res.json(userData.slice(-10)); // last 10 messages
 });
 
 // ===== HEALTH =====
@@ -107,5 +102,5 @@ app.get("/health", (req, res) => {
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () => {
-  console.log("✅ AI with Memory running on", PORT);
+  console.log("✅ AI with local memory running on", PORT);
 });
