@@ -1,48 +1,81 @@
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
+const { Pool } = require("pg");
 
 require("dotenv").config();
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-// ===== FILE DATABASE =====
-const DB_FILE = "memory.json";
+// ===== DATABASE =====
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
 
-// load memory file
-function loadDB() {
-  if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, JSON.stringify([]));
-  }
-  return JSON.parse(fs.readFileSync(DB_FILE));
+// ===== INIT TABLES =====
+async function initDB() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chats (
+      id SERIAL PRIMARY KEY,
+      user_name TEXT,
+      message TEXT,
+      reply TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE,
+      pin TEXT
+    )
+  `);
 }
+initDB();
 
-// save memory file
-function saveDB(data) {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-}
-
-// ===== FRONTEND =====
+// ===== ROUTES =====
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
 
-// ===== AI + MEMORY =====
+// ===== LOGIN =====
+app.post("/login", async (req, res) => {
+  const { username, pin } = req.body;
+
+  let user = await pool.query(
+    "SELECT * FROM users WHERE username=$1",
+    [username]
+  );
+
+  if (user.rows.length === 0) {
+    await pool.query(
+      "INSERT INTO users (username, pin) VALUES ($1, $2)",
+      [username, pin]
+    );
+    return res.json({ status: "created" });
+  }
+
+  if (user.rows[0].pin === pin) {
+    return res.json({ status: "ok" });
+  } else {
+    return res.status(401).json({ error: "Wrong PIN" });
+  }
+});
+
+// ===== AI =====
 app.post("/ai", async (req, res) => {
   try {
     const { prompt, userName } = req.body;
 
-    const OPENAI_KEY = process.env.OPENAI_KEY;
-
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${OPENAI_KEY}`,
+        Authorization: `Bearer ${process.env.OPENAI_KEY}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
@@ -51,7 +84,7 @@ app.post("/ai", async (req, res) => {
           {
             role: "system",
             content: userName
-              ? `The user's name is ${userName}. Remember them.`
+              ? `User name is ${userName}. Remember them.`
               : "You are a helpful assistant."
           },
           { role: "user", content: prompt }
@@ -62,35 +95,38 @@ app.post("/ai", async (req, res) => {
     const data = await aiRes.json();
     const reply = data.choices?.[0]?.message?.content || "No response";
 
-    // ===== SAVE TO FILE =====
-    const db = loadDB();
-
-    db.push({
-      user_name: userName || "guest",
-      message: prompt,
-      reply: reply,
-      time: new Date()
-    });
-
-    saveDB(db);
+    await pool.query(
+      "INSERT INTO chats (user_name, message, reply) VALUES ($1,$2,$3)",
+      [userName || "guest", prompt, reply]
+    );
 
     res.json({ result: reply });
 
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: "AI error" });
   }
 });
 
-// ===== LOAD MEMORY =====
-app.get("/memory/:name", (req, res) => {
-  const name = req.params.name;
+// ===== MEMORY =====
+app.get("/memory/:name", async (req, res) => {
+  const result = await pool.query(
+    "SELECT * FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 10",
+    [req.params.name]
+  );
+  res.json(result.rows);
+});
 
-  const db = loadDB();
+// ===== SCRAPER =====
+app.post("/scrape", async (req, res) => {
+  try {
+    const { url } = req.body;
+    const r = await fetch(url);
+    const html = await r.text();
 
-  const userData = db.filter(item => item.user_name === name);
-
-  res.json(userData.slice(-10)); // last 10 messages
+    res.json({ content: html.substring(0, 5000) });
+  } catch {
+    res.json({ content: "Failed to fetch site" });
+  }
 });
 
 // ===== HEALTH =====
@@ -98,9 +134,5 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// ===== START =====
 const PORT = process.env.PORT || 10000;
-
-app.listen(PORT, () => {
-  console.log("✅ AI with local memory running on", PORT);
-});
+app.listen(PORT, () => console.log("✅ FULL AI SYSTEM RUNNING"));
