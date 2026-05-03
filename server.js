@@ -15,7 +15,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ===== INIT =====
+// ===== INIT TABLES =====
 (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -40,19 +40,27 @@ const pool = new Pool({
 app.post("/login", async (req, res) => {
   const { username, pin } = req.body;
 
-  const u = await pool.query("SELECT * FROM users WHERE username=$1",[username]);
+  const user = await pool.query(
+    "SELECT * FROM users WHERE username=$1",
+    [username]
+  );
 
-  if (u.rows.length === 0) {
-    await pool.query("INSERT INTO users (username,pin) VALUES ($1,$2)",[username,pin]);
+  if (user.rows.length === 0) {
+    await pool.query(
+      "INSERT INTO users (username,pin) VALUES ($1,$2)",
+      [username, pin]
+    );
     return res.json({ status: "created" });
   }
 
-  if (u.rows[0].pin === pin) return res.json({ status: "ok" });
+  if (user.rows[0].pin === pin) {
+    return res.json({ status: "ok" });
+  }
 
   res.status(401).json({ error: "Wrong PIN" });
 });
 
-// ===== AI (WITH MEMORY) =====
+// ===== AI WITH MEMORY =====
 app.post("/ai", async (req, res) => {
   try {
     const { prompt, userName } = req.body;
@@ -62,7 +70,9 @@ app.post("/ai", async (req, res) => {
       [userName]
     );
 
-    const memoryText = mem.rows.map(m => `User:${m.message}\nAI:${m.reply}`).join("\n");
+    const memoryText = mem.rows
+      .map(m => `User:${m.message}\nAI:${m.reply}`)
+      .join("\n");
 
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -73,7 +83,10 @@ app.post("/ai", async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: `User:${userName}\nMemory:\n${memoryText}` },
+          {
+            role: "system",
+            content: `User:${userName}\nMemory:\n${memoryText}`
+          },
           { role: "user", content: prompt }
         ]
       })
@@ -117,10 +130,8 @@ app.post("/search", async (req, res) => {
 
     let match;
     while ((match = regex.exec(html)) !== null) {
-      results.push({
-        title: decodeURIComponent(match[1]),
-        link: decodeURIComponent(match[1])
-      });
+      const link = decodeURIComponent(match[1]);
+      results.push({ title: link, link });
       if (results.length >= 5) break;
     }
 
@@ -158,4 +169,4 @@ app.post("/fetch-article", async (req, res) => {
 app.get("/health",(req,res)=>res.json({status:"ok"}));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, ()=>console.log("✅ FULL SYSTEM RUNNING"));
+app.listen(PORT, ()=>console.log("✅ AI OS RUNNING"));
