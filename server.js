@@ -2,7 +2,6 @@ const express = require("express");
 const cors = require("cors");
 const path = require("path");
 const { Pool } = require("pg");
-
 require("dotenv").config();
 
 const app = express();
@@ -16,8 +15,8 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ===== INIT DB =====
-async function initDB() {
+// ===== INIT =====
+(async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chats (
       id SERIAL PRIMARY KEY,
@@ -27,15 +26,33 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
-}
-initDB();
 
-// ===== HOME =====
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT UNIQUE,
+      pin TEXT
+    )
+  `);
+})();
+
+// ===== LOGIN =====
+app.post("/login", async (req, res) => {
+  const { username, pin } = req.body;
+
+  const u = await pool.query("SELECT * FROM users WHERE username=$1",[username]);
+
+  if (u.rows.length === 0) {
+    await pool.query("INSERT INTO users (username,pin) VALUES ($1,$2)",[username,pin]);
+    return res.json({ status: "created" });
+  }
+
+  if (u.rows[0].pin === pin) return res.json({ status: "ok" });
+
+  res.status(401).json({ error: "Wrong PIN" });
 });
 
-// ===== AI WITH MEMORY =====
+// ===== AI (WITH MEMORY) =====
 app.post("/ai", async (req, res) => {
   try {
     const { prompt, userName } = req.body;
@@ -45,9 +62,7 @@ app.post("/ai", async (req, res) => {
       [userName]
     );
 
-    const memoryText = mem.rows
-      .map(m => `User: ${m.message}\nAI: ${m.reply}`)
-      .join("\n");
+    const memoryText = mem.rows.map(m => `User:${m.message}\nAI:${m.reply}`).join("\n");
 
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -58,17 +73,7 @@ app.post("/ai", async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          {
-            role: "system",
-            content: `
-User: ${userName}
-
-Memory:
-${memoryText}
-
-Use memory + be accurate.
-`
-          },
+          { role: "system", content: `User:${userName}\nMemory:\n${memoryText}` },
           { role: "user", content: prompt }
         ]
       })
@@ -89,23 +94,33 @@ Use memory + be accurate.
   }
 });
 
-// ===== SEARCH (CLICKABLE) =====
+// ===== MEMORY =====
+app.get("/memory/:name", async (req, res) => {
+  const r = await pool.query(
+    "SELECT * FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 10",
+    [req.params.name]
+  );
+  res.json(r.rows);
+});
+
+// ===== SEARCH (CLEAN LINKS) =====
 app.post("/search", async (req, res) => {
   try {
     const { query } = req.body;
-
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
     const r = await fetch(url);
     const html = await r.text();
 
     const results = [];
-    const regex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/g;
+    const regex = /uddg=([^&"]+)/g;
 
     let match;
     while ((match = regex.exec(html)) !== null) {
-      const link = match[1];
-      const title = match[2].replace(/<[^>]+>/g, "");
-      results.push({ title, link });
+      results.push({
+        title: decodeURIComponent(match[1]),
+        link: decodeURIComponent(match[1])
+      });
       if (results.length >= 5) break;
     }
 
@@ -116,37 +131,31 @@ app.post("/search", async (req, res) => {
   }
 });
 
-// ===== FETCH FULL ARTICLE =====
+// ===== FETCH ARTICLE =====
 app.post("/fetch-article", async (req, res) => {
   try {
-    const { url } = req.body;
-
-    const r = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0"
-      }
+    const r = await fetch(req.body.url, {
+      headers: { "User-Agent": "Mozilla/5.0" }
     });
 
     const html = await r.text();
 
-    // strip HTML tags (basic)
-    const text = html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
-                     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
-                     .replace(/<[^>]+>/g, " ")
-                     .replace(/\s+/g, " ")
-                     .trim();
+    const text = html
+      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi,"")
+      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi,"")
+      .replace(/<[^>]+>/g," ")
+      .replace(/\s+/g," ")
+      .trim();
 
-    res.json({ content: text.substring(0, 8000) });
+    res.json({ content: text.substring(0,10000) });
 
   } catch {
-    res.json({ content: "Failed to fetch article" });
+    res.json({ content: "Failed to fetch" });
   }
 });
 
 // ===== HEALTH =====
-app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
-});
+app.get("/health",(req,res)=>res.json({status:"ok"}));
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("✅ AI BROWSING OS RUNNING"));
+app.listen(PORT, ()=>console.log("✅ FULL SYSTEM RUNNING"));
