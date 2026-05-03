@@ -1,112 +1,128 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>AI Browsing OS</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Platform OS</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-  <style>
-    body { background:#111;color:white;font-family:Arial;margin:0 }
-    #chat { height:40vh;overflow:auto;padding:10px }
-    .msg { margin:5px;padding:8px;border-radius:6px }
-    .user { background:#333 }
-    .ai { background:#1e3a8a }
-    a { color:#4ea1ff }
-  </style>
+<style>
+body{background:#111;color:white;font-family:Arial}
+.msg{margin:5px;padding:8px;border-radius:6px}
+.user{background:#333}
+.ai{background:#1e3a8a}
+</style>
 </head>
 
 <body>
 
-<h2 style="text-align:center;">🤖 AI Browsing OS</h2>
+<h2>🤖 AI Platform</h2>
+
+<input id="user" placeholder="Name">
+<input id="pin" placeholder="PIN">
+<button onclick="login()">Login</button>
 
 <div id="chat"></div>
 
-<div style="text-align:center;">
-  <input id="msg">
-  <button onclick="send()">Send</button>
-</div>
+<input id="msg">
+<button onclick="send()">Send</button>
+<button onclick="startVoice()">🎤</button>
+<button onclick="loadMemory()">Load</button>
 
 <hr>
 
-<h3>🌐 AI Search</h3>
-
-<input id="searchBox" placeholder="Search anything...">
+<h3>🌐 Search</h3>
+<input id="searchBox">
 <button onclick="searchWeb()">Search</button>
-
 <div id="results"></div>
 
-<h3>🧠 Article Summary</h3>
+<h3>🧠 Summary</h3>
 <pre id="summary"></pre>
 
+<hr>
+
+<h3>🧪 Postman</h3>
+<input id="endpoint" value="/ai">
+<textarea id="body">{ "prompt":"Hello","userName":"William" }</textarea>
+<button onclick="runAPI()">Send</button>
+<pre id="res"></pre>
+
+<hr>
+
+<h3>💻 HTML Runner</h3>
+<textarea id="code"></textarea>
+<button onclick="runHTML()">Run</button>
+<iframe id="preview"></iframe>
+
 <script>
-let userName = "William";
+let userName="";
+
+// LOGIN
+async function login(){
+  userName=document.getElementById("user").value;
+  await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({username:userName,pin:document.getElementById("pin").value})});
+}
 
 // CHAT
 async function send(){
-  const text = document.getElementById("msg").value;
+  const text=msg.value;
+  const r=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({prompt:text,userName})});
+  const d=await r.json();
+  chat.innerHTML+=`<div class=user>${text}</div><div class=ai>${d.result}</div>`;
+  speechSynthesis.speak(new SpeechSynthesisUtterance(d.result));
+}
 
-  const res = await fetch("/ai",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({prompt:text,userName})
+// MEMORY
+async function loadMemory(){
+  const r=await fetch("/memory/"+userName);
+  const d=await r.json();
+  chat.innerHTML="";
+  d.reverse().forEach(x=>{
+    chat.innerHTML+=`<div class=user>${x.message}</div><div class=ai>${x.reply}</div>`;
   });
+}
 
-  const data = await res.json();
-
-  document.getElementById("chat").innerHTML +=
-    `<div class='msg user'>${text}</div>
-     <div class='msg ai'>${data.result}</div>`;
+// VOICE
+function startVoice(){
+  const r=new(webkitSpeechRecognition||SpeechRecognition)();
+  r.start();
+  r.onresult=e=>{msg.value=e.results[0][0].transcript;send();}
 }
 
 // SEARCH
 async function searchWeb(){
-  const query = document.getElementById("searchBox").value;
+  const r=await fetch("/search",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({query:searchBox.value})});
+  const d=await r.json();
 
-  const res = await fetch("/search",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({query})
-  });
-
-  const data = await res.json();
-
-  const div = document.getElementById("results");
-  div.innerHTML = "";
-
-  data.results.forEach(r=>{
-    div.innerHTML += `
-      <div style="margin:10px;">
-        <b>${r.title}</b><br>
-        <a href="#" onclick="readArticle('${r.link}')">${r.link}</a>
-      </div>
-    `;
+  results.innerHTML="";
+  d.results.forEach(x=>{
+    results.innerHTML+=`<div><a href="#" onclick="read('${x.link}')">${x.link}</a></div>`;
   });
 }
 
-// READ + SUMMARIZE
-async function readArticle(url){
-  document.getElementById("summary").innerText = "Loading...";
+async function read(url){
+  summary.innerText="Loading...";
+  const a=await fetch("/fetch-article",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({url})});
+  const c=await a.json();
 
-  const article = await fetch("/fetch-article",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({url})
-  });
+  const ai=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
+  body:JSON.stringify({prompt:"Summarize:\n"+c.content,userName})});
+  const d=await ai.json();
 
-  const content = await article.json();
+  summary.innerText=d.result;
+}
 
-  const ai = await fetch("/ai",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({
-      prompt: "Summarize this article:\n" + content.content,
-      userName
-    })
-  });
+// POSTMAN
+async function runAPI(){
+  const r=await fetch(endpoint.value,{method:"POST",headers:{"Content-Type":"application/json"},body:body.value});
+  res.innerText=JSON.stringify(await r.json(),null,2);
+}
 
-  const result = await ai.json();
-
-  document.getElementById("summary").innerText =
-    result.result;
+// HTML RUNNER
+function runHTML(){
+  preview.srcdoc=code.value;
 }
 </script>
 
