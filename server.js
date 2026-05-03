@@ -27,44 +27,12 @@ async function initDB() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      username TEXT UNIQUE,
-      pin TEXT
-    )
-  `);
 }
 initDB();
 
 // ===== HOME =====
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
-});
-
-// ===== LOGIN =====
-app.post("/login", async (req, res) => {
-  const { username, pin } = req.body;
-
-  const user = await pool.query(
-    "SELECT * FROM users WHERE username=$1",
-    [username]
-  );
-
-  if (user.rows.length === 0) {
-    await pool.query(
-      "INSERT INTO users (username,pin) VALUES ($1,$2)",
-      [username, pin]
-    );
-    return res.json({ status: "created" });
-  }
-
-  if (user.rows[0].pin === pin) {
-    return res.json({ status: "ok" });
-  }
-
-  res.status(401).json({ error: "Wrong PIN" });
 });
 
 // ===== AI WITH MEMORY =====
@@ -98,7 +66,7 @@ User: ${userName}
 Memory:
 ${memoryText}
 
-Use memory when answering.
+Use memory + be accurate.
 `
           },
           { role: "user", content: prompt }
@@ -116,34 +84,62 @@ Use memory when answering.
 
     res.json({ result: reply });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "AI error" });
   }
 });
 
-// ===== MEMORY =====
-app.get("/memory/:name", async (req, res) => {
-  const result = await pool.query(
-    "SELECT * FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 10",
-    [req.params.name]
-  );
-  res.json(result.rows);
-});
-
-// ===== 🌐 SEARCH (FIXED) =====
+// ===== SEARCH (CLICKABLE) =====
 app.post("/search", async (req, res) => {
   try {
     const { query } = req.body;
 
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-
     const r = await fetch(url);
     const html = await r.text();
 
-    res.json({ content: html.substring(0, 5000) });
+    const results = [];
+    const regex = /<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/g;
+
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const link = match[1];
+      const title = match[2].replace(/<[^>]+>/g, "");
+      results.push({ title, link });
+      if (results.length >= 5) break;
+    }
+
+    res.json({ results });
 
   } catch {
-    res.json({ content: "Search failed" });
+    res.json({ results: [] });
+  }
+});
+
+// ===== FETCH FULL ARTICLE =====
+app.post("/fetch-article", async (req, res) => {
+  try {
+    const { url } = req.body;
+
+    const r = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0"
+      }
+    });
+
+    const html = await r.text();
+
+    // strip HTML tags (basic)
+    const text = html.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+                     .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, "")
+                     .replace(/<[^>]+>/g, " ")
+                     .replace(/\s+/g, " ")
+                     .trim();
+
+    res.json({ content: text.substring(0, 8000) });
+
+  } catch {
+    res.json({ content: "Failed to fetch article" });
   }
 });
 
@@ -153,4 +149,4 @@ app.get("/health", (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("✅ FULL AI OS RUNNING"));
+app.listen(PORT, () => console.log("✅ AI BROWSING OS RUNNING"));
