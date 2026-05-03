@@ -38,7 +38,7 @@ async function initDB() {
 }
 initDB();
 
-// ===== ROUTES =====
+// ===== HOME =====
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "index.html"));
 });
@@ -67,11 +67,22 @@ app.post("/login", async (req, res) => {
   res.status(401).json({ error: "Wrong PIN" });
 });
 
-// ===== AI =====
+// ===== AI WITH MEMORY (🔥 FIXED) =====
 app.post("/ai", async (req, res) => {
   try {
     const { prompt, userName } = req.body;
 
+    // 🧠 LOAD LAST MEMORY
+    const mem = await pool.query(
+      "SELECT message, reply FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 5",
+      [userName]
+    );
+
+    const memoryText = mem.rows
+      .map(m => `User: ${m.message}\nAI: ${m.reply}`)
+      .join("\n");
+
+    // 🤖 AI CALL
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -83,9 +94,16 @@ app.post("/ai", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: userName
-              ? `User name is ${userName}. Remember them.`
-              : "You are a helpful assistant."
+            content: `
+You are a smart assistant.
+
+User name: ${userName}
+
+Memory:
+${memoryText}
+
+Use memory to answer questions and remember facts about the user.
+`
           },
           { role: "user", content: prompt }
         ]
@@ -95,14 +113,16 @@ app.post("/ai", async (req, res) => {
     const data = await aiRes.json();
     const reply = data.choices?.[0]?.message?.content || "No response";
 
+    // 💾 SAVE
     await pool.query(
       "INSERT INTO chats (user_name,message,reply) VALUES ($1,$2,$3)",
-      [userName || "guest", prompt, reply]
+      [userName, prompt, reply]
     );
 
     res.json({ result: reply });
 
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ error: "AI error" });
   }
 });
@@ -116,7 +136,7 @@ app.get("/memory/:name", async (req, res) => {
   res.json(result.rows);
 });
 
-// ===== SCRAPE (BASIC) =====
+// ===== SCRAPE =====
 app.post("/scrape", async (req, res) => {
   try {
     const r = await fetch(req.body.url);
