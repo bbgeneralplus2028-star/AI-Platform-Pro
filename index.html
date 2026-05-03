@@ -1,194 +1,112 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>AI Platform OS</title>
+  <title>AI Browsing OS</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
   <style>
     body { background:#111;color:white;font-family:Arial;margin:0 }
-    #chat { height:45vh;overflow:auto;padding:10px }
+    #chat { height:40vh;overflow:auto;padding:10px }
     .msg { margin:5px;padding:8px;border-radius:6px }
     .user { background:#333 }
     .ai { background:#1e3a8a }
-    textarea { width:90%; }
+    a { color:#4ea1ff }
   </style>
 </head>
 
 <body>
 
-<h2 style="text-align:center;">🤖 AI Platform OS</h2>
-
-<!-- LOGIN -->
-<div style="text-align:center;">
-  <input id="user" placeholder="Name">
-  <input id="pin" placeholder="PIN">
-  <button onclick="login()">Login</button>
-</div>
+<h2 style="text-align:center;">🤖 AI Browsing OS</h2>
 
 <div id="chat"></div>
 
 <div style="text-align:center;">
   <input id="msg">
   <button onclick="send()">Send</button>
-  <button onclick="startVoice()">🎤</button>
-  <button onclick="loadMemory()">Load</button>
 </div>
 
-<button onclick="openAdmin()">⚙️ Admin</button>
+<hr>
 
-<!-- ADMIN -->
-<div id="admin" style="display:none;background:black;padding:10px;">
-  <input id="adminPin" placeholder="Admin PIN">
-  <button onclick="unlock()">Unlock</button>
+<h3>🌐 AI Search</h3>
 
-  <div id="adminUI" style="display:none;">
+<input id="searchBox" placeholder="Search anything...">
+<button onclick="searchWeb()">Search</button>
 
-    <h3>🌐 AI Web Search</h3>
-    <input id="searchBox" placeholder="Search anything...">
-    <button onclick="searchWeb()">Search</button>
-    <pre id="searchResult"></pre>
+<div id="results"></div>
 
-    <h3>🧪 Postman</h3>
-    <select id="method">
-      <option>POST</option>
-      <option>GET</option>
-    </select>
-    <input id="endpoint" placeholder="/ai">
-    <textarea id="body">{ "prompt":"Hello","userName":"William" }</textarea>
-    <button onclick="runAPI()">Send</button>
-    <pre id="res"></pre>
-
-    <h3>💻 HTML Runner</h3>
-    <textarea id="code"></textarea>
-    <button onclick="runHTML()">Run</button>
-    <iframe id="preview"></iframe>
-
-    <h3>🧠 Upgrade</h3>
-    <textarea id="upgrade"></textarea>
-    <button onclick="evalUpgrade()">Inject</button>
-
-  </div>
-</div>
+<h3>🧠 Article Summary</h3>
+<pre id="summary"></pre>
 
 <script>
-let userName="";
-
-// LOGIN
-async function login(){
-  userName=document.getElementById("user").value;
-  const pin=document.getElementById("pin").value;
-
-  const res=await fetch("/login",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({username:userName,pin})
-  });
-
-  alert(await res.text());
-}
+let userName = "William";
 
 // CHAT
 async function send(){
-  const text=document.getElementById("msg").value;
+  const text = document.getElementById("msg").value;
 
-  const res=await fetch("/ai",{
+  const res = await fetch("/ai",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({prompt:text,userName})
+    body: JSON.stringify({prompt:text,userName})
   });
 
-  const data=await res.json();
+  const data = await res.json();
 
-  document.getElementById("chat").innerHTML+=
+  document.getElementById("chat").innerHTML +=
     `<div class='msg user'>${text}</div>
      <div class='msg ai'>${data.result}</div>`;
-
-  speak(data.result);
 }
 
-// MEMORY
-async function loadMemory(){
-  const res=await fetch("/memory/"+userName);
-  const data=await res.json();
-
-  document.getElementById("chat").innerHTML="";
-  data.reverse().forEach(x=>{
-    document.getElementById("chat").innerHTML+=
-      `<div class='msg user'>${x.message}</div>
-       <div class='msg ai'>${x.reply}</div>`;
-  });
-}
-
-// VOICE
-function startVoice(){
-  const rec=new (window.SpeechRecognition||window.webkitSpeechRecognition)();
-  rec.start();
-  rec.onresult=e=>{
-    document.getElementById("msg").value=e.results[0][0].transcript;
-    send();
-  };
-}
-function speak(text){
-  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
-}
-
-// ADMIN
-function openAdmin(){document.getElementById("admin").style.display="block";}
-function unlock(){
-  if(document.getElementById("adminPin").value==="20252025"){
-    document.getElementById("adminUI").style.display="block";
-  }
-}
-
-// 🌐 SEARCH
+// SEARCH
 async function searchWeb(){
-  const query=document.getElementById("searchBox").value;
+  const query = document.getElementById("searchBox").value;
 
-  const res=await fetch("/search",{
+  const res = await fetch("/search",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({query})
+    body: JSON.stringify({query})
   });
 
-  const data=await res.json();
+  const data = await res.json();
 
-  const ai=await fetch("/ai",{
+  const div = document.getElementById("results");
+  div.innerHTML = "";
+
+  data.results.forEach(r=>{
+    div.innerHTML += `
+      <div style="margin:10px;">
+        <b>${r.title}</b><br>
+        <a href="#" onclick="readArticle('${r.link}')">${r.link}</a>
+      </div>
+    `;
+  });
+}
+
+// READ + SUMMARIZE
+async function readArticle(url){
+  document.getElementById("summary").innerText = "Loading...";
+
+  const article = await fetch("/fetch-article",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      prompt:"Summarize this:\n"+data.content,
+    body: JSON.stringify({url})
+  });
+
+  const content = await article.json();
+
+  const ai = await fetch("/ai",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({
+      prompt: "Summarize this article:\n" + content.content,
       userName
     })
   });
 
-  const result=await ai.json();
+  const result = await ai.json();
 
-  document.getElementById("searchResult").innerText=result.result;
-}
-
-// POSTMAN
-async function runAPI(){
-  const method=document.getElementById("method").value;
-  const endpoint=document.getElementById("endpoint").value;
-  const body=document.getElementById("body").value;
-
-  let opt={method,headers:{"Content-Type":"application/json"}};
-  if(method==="POST") opt.body=body;
-
-  const res=await fetch(endpoint,opt);
-  document.getElementById("res").innerText=
-    JSON.stringify(await res.json(),null,2);
-}
-
-// HTML
-function runHTML(){
-  document.getElementById("preview").srcdoc=
-    document.getElementById("code").value;
-}
-
-// UPGRADE
-function evalUpgrade(){
-  eval(document.getElementById("upgrade").value);
+  document.getElementById("summary").innerText =
+    result.result;
 }
 </script>
 
