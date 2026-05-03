@@ -1,233 +1,166 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>AI Platform Pro</title>
+  <title>AI Platform OS</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="manifest" href="manifest.json">
 
   <style>
-    body { margin:0; font-family:Arial; background:#111; color:white; }
-
-    header { background:#000; padding:15px; text-align:center; font-size:20px; }
-
-    #chat {
-      max-width:800px;
-      margin:auto;
-      padding:10px;
-      height:60vh;
-      overflow-y:auto;
-    }
-
-    .msg { padding:10px; margin:6px; border-radius:8px; }
-    .user { background:#333; }
-    .ai { background:#1e3a8a; }
-
-    #controls {
-      position:fixed;
-      bottom:0;
-      width:100%;
-      background:#000;
-      padding:10px;
-      text-align:center;
-    }
-
-    input {
-      padding:10px;
-      border-radius:6px;
-      border:none;
-      margin:5px;
-    }
-
-    button {
-      padding:10px;
-      margin:5px;
-      border-radius:6px;
-      cursor:pointer;
-    }
+    body { background:#111;color:white;font-family:Arial;margin:0 }
+    #chat { height:50vh;overflow:auto;padding:10px }
+    .msg { margin:5px;padding:8px;border-radius:6px }
+    .user { background:#333 }
+    .ai { background:#1e3a8a }
   </style>
 </head>
 
 <body>
 
-<header>🤖 AI Platform Pro</header>
+<h2 style="text-align:center;">🤖 AI Platform OS</h2>
 
-<!-- NAME INPUT -->
-<div style="text-align:center; margin:10px;">
-  <input id="username" placeholder="Enter your name">
-  <button onclick="saveName()">Save Name</button>
-  <button onclick="loadMemory()">Load Memory</button>
+<!-- LOGIN -->
+<div style="text-align:center;">
+  <input id="user" placeholder="Name">
+  <input id="pin" placeholder="PIN">
+  <button onclick="login()">Login</button>
 </div>
 
 <div id="chat"></div>
 
-<div id="controls">
-  <input id="msg" placeholder="Type or speak...">
+<div style="text-align:center;">
+  <input id="msg">
   <button onclick="send()">Send</button>
-  <button onclick="startVoice()">🎤</button>
-  <button onclick="clearMemory()">🧹</button>
+  <button onclick="loadMemory()">Load</button>
+</div>
+
+<!-- ADMIN -->
+<button onclick="openAdmin()">⚙️</button>
+
+<div id="admin" style="display:none;background:black;padding:10px;">
+  <input id="adminPin" placeholder="Admin PIN">
+  <button onclick="unlock()">Unlock</button>
+
+  <div id="adminUI" style="display:none;">
+
+    <h3>🌐 Browser</h3>
+    <input id="url">
+    <button onclick="openSite()">Open</button>
+    <button onclick="summarize()">Summarize</button>
+    <iframe id="frame" style="width:100%;height:200px;"></iframe>
+
+    <h3>🧪 API</h3>
+    <input id="endpoint">
+    <textarea id="body"></textarea>
+    <button onclick="runAPI()">Send</button>
+    <pre id="res"></pre>
+
+    <h3>💻 HTML</h3>
+    <textarea id="code"></textarea>
+    <button onclick="runHTML()">Run</button>
+    <iframe id="preview"></iframe>
+
+    <h3>🧠 Upgrade</h3>
+    <textarea id="upgrade"></textarea>
+    <button onclick="evalUpgrade()">Inject</button>
+
+  </div>
 </div>
 
 <script>
+let userName="";
 
-const API_URL = "/ai";
+// LOGIN
+async function login(){
+  userName=document.getElementById("user").value;
+  const pin=document.getElementById("pin").value;
 
-let userName = localStorage.getItem("userName") || "";
-let memory = [];
-
-const chat = document.getElementById("chat");
-
-// ===== RENDER =====
-function render(){
-  chat.innerHTML = "";
-  memory.forEach(m=>{
-    const div = document.createElement("div");
-    div.className = "msg " + m.type;
-    div.innerText = m.text;
-    chat.appendChild(div);
+  const res=await fetch("/login",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({username:userName,pin})
   });
-  chat.scrollTop = chat.scrollHeight;
+
+  alert(await res.text());
 }
 
-// ===== SAVE NAME =====
-function saveName(){
-  const nameInput = document.getElementById("username").value.trim();
-  if(!nameInput) return;
+// CHAT
+async function send(){
+  const text=document.getElementById("msg").value;
 
-  userName = nameInput;
-  localStorage.setItem("userName", userName);
+  const res=await fetch("/ai",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({prompt:text,userName})
+  });
 
-  alert("Saved: " + userName);
+  const data=await res.json();
+
+  document.getElementById("chat").innerHTML+=
+    `<div class='msg user'>${text}</div>
+     <div class='msg ai'>${data.result}</div>`;
 }
 
-// ===== LOAD MEMORY FROM SERVER =====
+// MEMORY
 async function loadMemory(){
-  if(!userName){
-    alert("Enter name first");
-    return;
+  const res=await fetch("/memory/"+userName);
+  const data=await res.json();
+
+  document.getElementById("chat").innerHTML="";
+  data.reverse().forEach(x=>{
+    document.getElementById("chat").innerHTML+=
+      `<div class='msg user'>${x.message}</div>
+       <div class='msg ai'>${x.reply}</div>`;
+  });
+}
+
+// ADMIN
+function openAdmin(){document.getElementById("admin").style.display="block";}
+function unlock(){
+  if(document.getElementById("adminPin").value==="20252025"){
+    document.getElementById("adminUI").style.display="block";
   }
+}
 
-  const res = await fetch(`/memory/${userName}`);
-  const data = await res.json();
+// BROWSER
+function openSite(){
+  document.getElementById("frame").src=
+    document.getElementById("url").value;
+}
 
-  memory = [];
+// SUMMARIZE
+async function summarize(){
+  const url=document.getElementById("url").value;
 
-  data.reverse().forEach(item=>{
-    memory.push({text:"You: " + item.message, type:"user"});
-    memory.push({text:"AI: " + item.reply, type:"ai"});
+  const res=await fetch("/ai",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({prompt:"Summarize "+url})
   });
 
-  render();
+  alert((await res.json()).result);
 }
 
-// ===== TYPEWRITER =====
-function typeWriter(text, done){
-  let i = 0;
-  let current = "";
+// POSTMAN
+async function runAPI(){
+  const res=await fetch(document.getElementById("endpoint").value,{
+    method:"POST",
+    body:document.getElementById("body").value,
+    headers:{"Content-Type":"application/json"}
+  });
 
-  const div = document.createElement("div");
-  div.className = "msg ai";
-  chat.appendChild(div);
-
-  function typing(){
-    if(i < text.length){
-      current += text.charAt(i);
-      div.innerText = "AI: " + current;
-      i++;
-      setTimeout(typing, 15);
-    } else {
-      done();
-    }
-  }
-
-  typing();
+  document.getElementById("res").innerText=
+    JSON.stringify(await res.json(),null,2);
 }
 
-// ===== SEND =====
-async function send(textOverride){
-  const input = document.getElementById("msg");
-  const text = textOverride || input.value.trim();
-  if(!text) return;
-
-  memory.push({text:"You: " + text, type:"user"});
-  input.value="";
-  render();
-
-  try{
-    const res = await fetch(API_URL,{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({
-        prompt: text,
-        userName: userName
-      })
-    });
-
-    const data = await res.json();
-    const reply = data.result || "No response";
-
-    typeWriter(reply, ()=>{
-      memory.push({text:"AI: " + reply, type:"ai"});
-    });
-
-    speak(reply);
-
-  }catch(err){
-    memory.push({text:"Error: " + err.message, type:"ai"});
-    render();
-  }
+// HTML RUNNER
+function runHTML(){
+  document.getElementById("preview").srcdoc=
+    document.getElementById("code").value;
 }
 
-// ===== VOICE =====
-function speak(text){
-  const speech = new SpeechSynthesisUtterance(text);
-  speech.lang = "en-US";
-  window.speechSynthesis.speak(speech);
+// UPGRADE
+function evalUpgrade(){
+  eval(document.getElementById("upgrade").value);
 }
-
-function startVoice(){
-  const SpeechRecognition =
-    window.SpeechRecognition || window.webkitSpeechRecognition;
-
-  if(!SpeechRecognition){
-    alert("Voice not supported");
-    return;
-  }
-
-  const rec = new SpeechRecognition();
-  rec.start();
-
-  rec.onresult = function(e){
-    const voiceText = e.results[0][0].transcript;
-    send(voiceText);
-  };
-}
-
-// ===== CLEAR =====
-function clearMemory(){
-  memory = [];
-  render();
-}
-
-// ===== INSTALL =====
-let deferredPrompt;
-
-window.addEventListener("beforeinstallprompt", (e)=>{
-  e.preventDefault();
-  deferredPrompt = e;
-
-  const btn = document.createElement("button");
-  btn.innerText = "📱 Install App";
-
-  btn.onclick = ()=> deferredPrompt.prompt();
-
-  document.body.appendChild(btn);
-});
-
-// ===== SERVICE WORKER =====
-if ("serviceWorker" in navigator) {
-  navigator.serviceWorker.register("/service-worker.js");
-}
-
 </script>
 
 </body>
