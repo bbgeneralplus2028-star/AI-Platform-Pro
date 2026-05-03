@@ -10,6 +10,7 @@
     .msg { margin:5px;padding:8px;border-radius:6px }
     .user { background:#333 }
     .ai { background:#1e3a8a }
+    textarea { width:90%; }
   </style>
 </head>
 
@@ -29,12 +30,13 @@
 <div style="text-align:center;">
   <input id="msg">
   <button onclick="send()">Send</button>
+  <button onclick="startVoice()">🎤</button>
   <button onclick="loadMemory()">Load</button>
 </div>
 
-<!-- ADMIN -->
-<button onclick="openAdmin()">⚙️</button>
+<button onclick="openAdmin()">⚙️ Admin</button>
 
+<!-- ADMIN PANEL -->
 <div id="admin" style="display:none;background:black;padding:10px;">
   <input id="adminPin" placeholder="Admin PIN">
   <button onclick="unlock()">Unlock</button>
@@ -47,13 +49,17 @@
     <button onclick="summarize()">Summarize</button>
     <iframe id="frame" style="width:100%;height:200px;"></iframe>
 
-    <h3>🧪 API</h3>
-    <input id="endpoint">
-    <textarea id="body"></textarea>
+    <h3>🧪 Postman</h3>
+    <select id="method">
+      <option>POST</option>
+      <option>GET</option>
+    </select>
+    <input id="endpoint" placeholder="/ai">
+    <textarea id="body">{ "prompt":"Hello","userName":"William" }</textarea>
     <button onclick="runAPI()">Send</button>
     <pre id="res"></pre>
 
-    <h3>💻 HTML</h3>
+    <h3>💻 HTML Runner</h3>
     <textarea id="code"></textarea>
     <button onclick="runHTML()">Run</button>
     <iframe id="preview"></iframe>
@@ -82,7 +88,7 @@ async function login(){
   alert(await res.text());
 }
 
-// CHAT
+// SEND
 async function send(){
   const text=document.getElementById("msg").value;
 
@@ -97,6 +103,8 @@ async function send(){
   document.getElementById("chat").innerHTML+=
     `<div class='msg user'>${text}</div>
      <div class='msg ai'>${data.result}</div>`;
+
+  speak(data.result);
 }
 
 // MEMORY
@@ -112,6 +120,21 @@ async function loadMemory(){
   });
 }
 
+// VOICE INPUT
+function startVoice(){
+  const rec=new (window.SpeechRecognition||window.webkitSpeechRecognition)();
+  rec.start();
+  rec.onresult=e=>{
+    document.getElementById("msg").value=e.results[0][0].transcript;
+    send();
+  };
+}
+
+// VOICE OUTPUT
+function speak(text){
+  speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+
 // ADMIN
 function openAdmin(){document.getElementById("admin").style.display="block";}
 function unlock(){
@@ -122,31 +145,30 @@ function unlock(){
 
 // BROWSER
 function openSite(){
-  document.getElementById("frame").src=
-    document.getElementById("url").value;
+  document.getElementById("frame").src=document.getElementById("url").value;
 }
 
 // SUMMARIZE
 async function summarize(){
   const url=document.getElementById("url").value;
-
   const res=await fetch("/ai",{
     method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({prompt:"Summarize "+url})
   });
-
   alert((await res.json()).result);
 }
 
 // POSTMAN
 async function runAPI(){
-  const res=await fetch(document.getElementById("endpoint").value,{
-    method:"POST",
-    body:document.getElementById("body").value,
-    headers:{"Content-Type":"application/json"}
-  });
+  const method=document.getElementById("method").value;
+  const endpoint=document.getElementById("endpoint").value;
+  const body=document.getElementById("body").value;
 
+  let opt={method,headers:{"Content-Type":"application/json"}};
+  if(method==="POST") opt.body=body;
+
+  const res=await fetch(endpoint,opt);
   document.getElementById("res").innerText=
     JSON.stringify(await res.json(),null,2);
 }
