@@ -47,14 +47,14 @@ app.get("/", (req, res) => {
 app.post("/login", async (req, res) => {
   const { username, pin } = req.body;
 
-  let user = await pool.query(
+  const user = await pool.query(
     "SELECT * FROM users WHERE username=$1",
     [username]
   );
 
   if (user.rows.length === 0) {
     await pool.query(
-      "INSERT INTO users (username, pin) VALUES ($1, $2)",
+      "INSERT INTO users (username, pin) VALUES ($1,$2)",
       [username, pin]
     );
     return res.json({ status: "created" });
@@ -62,9 +62,9 @@ app.post("/login", async (req, res) => {
 
   if (user.rows[0].pin === pin) {
     return res.json({ status: "ok" });
-  } else {
-    return res.status(401).json({ error: "Wrong PIN" });
   }
+
+  res.status(401).json({ error: "Wrong PIN" });
 });
 
 // ===== AI =====
@@ -96,13 +96,13 @@ app.post("/ai", async (req, res) => {
     const reply = data.choices?.[0]?.message?.content || "No response";
 
     await pool.query(
-      "INSERT INTO chats (user_name, message, reply) VALUES ($1,$2,$3)",
+      "INSERT INTO chats (user_name,message,reply) VALUES ($1,$2,$3)",
       [userName || "guest", prompt, reply]
     );
 
     res.json({ result: reply });
 
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "AI error" });
   }
 });
@@ -116,16 +116,14 @@ app.get("/memory/:name", async (req, res) => {
   res.json(result.rows);
 });
 
-// ===== SCRAPER =====
+// ===== SCRAPE (BASIC) =====
 app.post("/scrape", async (req, res) => {
   try {
-    const { url } = req.body;
-    const r = await fetch(url);
+    const r = await fetch(req.body.url);
     const html = await r.text();
-
-    res.json({ content: html.substring(0, 5000) });
+    res.json({ content: html.substring(0, 3000) });
   } catch {
-    res.json({ content: "Failed to fetch site" });
+    res.json({ content: "Failed to fetch" });
   }
 });
 
@@ -135,4 +133,4 @@ app.get("/health", (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("✅ FULL AI SYSTEM RUNNING"));
+app.listen(PORT, () => console.log("✅ AI PLATFORM OS RUNNING"));
