@@ -16,7 +16,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ===== INIT TABLES =====
+// ===== INIT DB =====
 async function initDB() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chats (
@@ -54,7 +54,7 @@ app.post("/login", async (req, res) => {
 
   if (user.rows.length === 0) {
     await pool.query(
-      "INSERT INTO users (username, pin) VALUES ($1,$2)",
+      "INSERT INTO users (username,pin) VALUES ($1,$2)",
       [username, pin]
     );
     return res.json({ status: "created" });
@@ -67,14 +67,13 @@ app.post("/login", async (req, res) => {
   res.status(401).json({ error: "Wrong PIN" });
 });
 
-// ===== AI WITH MEMORY (🔥 FIXED) =====
+// ===== AI WITH MEMORY =====
 app.post("/ai", async (req, res) => {
   try {
     const { prompt, userName } = req.body;
 
-    // 🧠 LOAD LAST MEMORY
     const mem = await pool.query(
-      "SELECT message, reply FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 5",
+      "SELECT message,reply FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 5",
       [userName]
     );
 
@@ -82,7 +81,6 @@ app.post("/ai", async (req, res) => {
       .map(m => `User: ${m.message}\nAI: ${m.reply}`)
       .join("\n");
 
-    // 🤖 AI CALL
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -95,14 +93,12 @@ app.post("/ai", async (req, res) => {
           {
             role: "system",
             content: `
-You are a smart assistant.
-
-User name: ${userName}
+User: ${userName}
 
 Memory:
 ${memoryText}
 
-Use memory to answer questions and remember facts about the user.
+Use memory when answering.
 `
           },
           { role: "user", content: prompt }
@@ -113,7 +109,6 @@ Use memory to answer questions and remember facts about the user.
     const data = await aiRes.json();
     const reply = data.choices?.[0]?.message?.content || "No response";
 
-    // 💾 SAVE
     await pool.query(
       "INSERT INTO chats (user_name,message,reply) VALUES ($1,$2,$3)",
       [userName, prompt, reply]
@@ -122,7 +117,6 @@ Use memory to answer questions and remember facts about the user.
     res.json({ result: reply });
 
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: "AI error" });
   }
 });
@@ -136,14 +130,20 @@ app.get("/memory/:name", async (req, res) => {
   res.json(result.rows);
 });
 
-// ===== SCRAPE =====
-app.post("/scrape", async (req, res) => {
+// ===== 🌐 SEARCH (FIXED) =====
+app.post("/search", async (req, res) => {
   try {
-    const r = await fetch(req.body.url);
+    const { query } = req.body;
+
+    const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+
+    const r = await fetch(url);
     const html = await r.text();
-    res.json({ content: html.substring(0, 3000) });
+
+    res.json({ content: html.substring(0, 5000) });
+
   } catch {
-    res.json({ content: "Failed to fetch" });
+    res.json({ content: "Search failed" });
   }
 });
 
@@ -153,4 +153,4 @@ app.get("/health", (req, res) => {
 });
 
 const PORT = process.env.PORT || 10000;
-app.listen(PORT, () => console.log("✅ AI PLATFORM OS RUNNING"));
+app.listen(PORT, () => console.log("✅ FULL AI OS RUNNING"));
