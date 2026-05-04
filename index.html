@@ -1,25 +1,32 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI OS</title>
+
 <style>
 body{margin:0;background:#111;color:white;font-family:Arial}
-.sidebar{width:200px;float:left;background:#000;height:100vh}
+.sidebar{width:200px;background:#000;height:100vh;float:left}
 .sidebar button{width:100%;padding:10px;background:#111;color:white;border:none}
 .main{margin-left:200px;padding:10px}
 .panel{display:none}
+.chatbox{height:300px;overflow:auto;background:#000;padding:10px}
+textarea,input{width:90%;margin:5px}
 </style>
 </head>
 
 <body>
 
 <div class="sidebar">
-<button onclick="show('chat')">Chat</button>
-<button onclick="show('search')">Search</button>
-<button onclick="show('files')">Files</button>
-<button onclick="show('agents')">Agents</button>
-<button onclick="show('api')">API</button>
-<button onclick="show('pay')">Pay</button>
+<button onclick="show('chat')">💬 Chat</button>
+<button onclick="show('search')">🌐 Search</button>
+<button onclick="show('qr')">🔳 QR</button>
+<button onclick="show('translate')">🌐 Translate</button>
+<button onclick="show('files')">📁 Files</button>
+<button onclick="show('agents')">🤖 Agents</button>
+<button onclick="show('api')">🧪 API</button>
+<button onclick="show('upgrade')">⚙️ Upgrade</button>
+<button onclick="show('pay')">💳 Pay</button>
 </div>
 
 <div class="main">
@@ -28,36 +35,68 @@ body{margin:0;background:#111;color:white;font-family:Arial}
 <input id="pin" placeholder="PIN">
 <button onclick="login()">Login</button>
 
+<!-- CHAT -->
 <div id="chat" class="panel">
-<input id="msg"><button onclick="send()">Send</button>
-<div id="chatBox"></div>
+<h3>ChatGPT</h3>
+<div id="chatBox" class="chatbox"></div>
+<input id="msg">
+<button onclick="send()">Send</button>
+<button onclick="voice()">🎤</button>
 </div>
 
+<!-- SEARCH -->
 <div id="search" class="panel">
 <input id="q"><button onclick="search()">Search</button>
 <div id="results"></div>
-<pre id="sum"></pre>
+<pre id="summary"></pre>
 </div>
 
+<!-- QR -->
+<div id="qr" class="panel">
+<input id="qrText">
+<button onclick="makeQR()">Generate</button>
+<div id="qrOut"></div>
+</div>
+
+<!-- TRANSLATE -->
+<div id="translate" class="panel">
+<textarea id="t"></textarea>
+<button onclick="translate()">Translate</button>
+<button onclick="voiceT()">🎤</button>
+<pre id="tOut"></pre>
+</div>
+
+<!-- FILES -->
 <div id="files" class="panel">
-<input type="file" id="f"><button onclick="up()">Upload</button>
+<input type="file" id="f">
+<button onclick="upload()">Upload</button>
 <button onclick="list()">List</button>
-<div id="fl"></div>
+<div id="fileList"></div>
 </div>
 
+<!-- AGENTS -->
 <div id="agents" class="panel">
-<input id="goal"><button onclick="agent()">Start</button>
+<input id="goal">
+<button onclick="agent()">Start Agent</button>
 </div>
 
+<!-- API -->
 <div id="api" class="panel">
 <input id="url" value="/ai">
-<textarea id="body">{ "prompt":"hi","userName":"William" }</textarea>
+<textarea id="body">{ "prompt":"Hello","userName":"William" }</textarea>
 <button onclick="api()">Send</button>
 <pre id="out"></pre>
 </div>
 
+<!-- UPGRADE -->
+<div id="upgrade" class="panel">
+<textarea id="code"></textarea>
+<button onclick="run()">Inject</button>
+</div>
+
+<!-- PAY -->
 <div id="pay" class="panel">
-<button onclick="buy()">Buy</button>
+<button onclick="buy()">Upgrade to Pro</button>
 </div>
 
 </div>
@@ -65,24 +104,42 @@ body{margin:0;background:#111;color:white;font-family:Arial}
 <script>
 let userName="";
 
+// PANEL
 function show(id){
  document.querySelectorAll(".panel").forEach(p=>p.style.display="none");
  document.getElementById(id).style.display="block";
 }
 
+// LOGIN
 async function login(){
  userName=user.value;
  await fetch("/login",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({username:userName,pin:pin.value})});
 }
 
+// CHAT
 async function send(){
+ const text=msg.value;
+
  const r=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
- body:JSON.stringify({prompt:msg.value,userName})});
+ body:JSON.stringify({prompt:text,userName})});
+
  const d=await r.json();
- chatBox.innerHTML+=msg.value+"<br>"+d.result+"<br>";
+
+ chatBox.innerHTML+=`<div>🧑 ${text}</div><div>🤖 ${d.result}</div>`;
+ chatBox.scrollTop=chatBox.scrollHeight;
+
+ speechSynthesis.speak(new SpeechSynthesisUtterance(d.result));
 }
 
+// VOICE
+function voice(){
+ const r=new (webkitSpeechRecognition||SpeechRecognition)();
+ r.start();
+ r.onresult=e=>{msg.value=e.results[0][0].transcript;send();}
+}
+
+// SEARCH
 async function search(){
  const r=await fetch("/search",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({query:q.value})});
@@ -95,17 +152,38 @@ async function search(){
 }
 
 async function read(u){
+ summary.innerText="Loading...";
  const a=await fetch("/fetch-article",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({url:u})});
  const c=await a.json();
 
  const ai=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
- body:JSON.stringify({prompt:c.content,userName})});
+ body:JSON.stringify({prompt:"Summarize:\n"+c.content,userName})});
  const d=await ai.json();
- sum.innerText=d.result;
+ summary.innerText=d.result;
 }
 
-async function up(){
+// QR
+function makeQR(){
+ qrOut.innerHTML=`<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrText.value)}">`;
+}
+
+// TRANSLATE
+async function translate(){
+ const r=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({prompt:"Translate to English:\n"+t.value,userName})});
+ const d=await r.json();
+ tOut.innerText=d.result;
+}
+
+function voiceT(){
+ const r=new (webkitSpeechRecognition||SpeechRecognition)();
+ r.start();
+ r.onresult=e=>{t.value=e.results[0][0].transcript;translate();}
+}
+
+// FILES
+async function upload(){
  const fd=new FormData();
  fd.append("file",f.files[0]);
  await fetch("/upload",{method:"POST",body:fd});
@@ -114,20 +192,28 @@ async function up(){
 async function list(){
  const r=await fetch("/files");
  const d=await r.json();
- fl.innerHTML=d.join("<br>");
+ fileList.innerHTML=d.join("<br>");
 }
 
+// AGENT
 async function agent(){
  await fetch("/agent/create",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({goal:goal.value,interval:60000,userName})});
- alert("Agent running");
+ alert("Agent started");
 }
 
+// API
 async function api(){
  const r=await fetch(url.value,{method:"POST",headers:{"Content-Type":"application/json"},body:body.value});
  out.innerText=await r.text();
 }
 
+// UPGRADE
+function run(){
+ eval(code.value);
+}
+
+// PAY
 async function buy(){
  const r=await fetch("/checkout",{method:"POST"});
  const d=await r.json();
