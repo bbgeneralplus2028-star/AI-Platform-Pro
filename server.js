@@ -21,35 +21,121 @@ const pool = new Pool({
 // ===== INIT TABLES =====
 (async () => {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS chats(
-      id SERIAL PRIMARY KEY,
-      user_name TEXT,
-      message TEXT,
-      reply TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  CREATE TABLE IF NOT EXISTS users(
+    id SERIAL PRIMARY KEY,
+    user_name TEXT UNIQUE,
+    profile JSONB DEFAULT '{}'
+  )`);
 
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS leads(
-      id SERIAL PRIMARY KEY,
-      query TEXT,
-      link TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `);
+  CREATE TABLE IF NOT EXISTS memory(
+    id SERIAL PRIMARY KEY,
+    user_name TEXT,
+    category TEXT,
+    content TEXT,
+    importance INT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS decisions(
+    id SERIAL PRIMARY KEY,
+    user_name TEXT,
+    goal TEXT,
+    action TEXT,
+    result TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
+
+  await pool.query(`
+  CREATE TABLE IF NOT EXISTS leads(
+    id SERIAL PRIMARY KEY,
+    query TEXT,
+    link TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )`);
 })();
 
-// ===== AI CHAT =====
+// ===== AI CHAT WITH MEMORY =====
 app.post("/ai", async (req, res) => {
   const { prompt, userName } = req.body;
 
+  // STORE USER INPUT
+  await pool.query(
+    "INSERT INTO memory(user_name,category,content) VALUES($1,$2,$3)",
+    [userName, "conversation", prompt]
+  );
+
+  // LOAD MEMORY
   const mem = await pool.query(
-    "SELECT message,reply FROM chats WHERE user_name=$1 ORDER BY created_at DESC LIMIT 5",
+    "SELECT content FROM memory WHERE user_name=$1 ORDER BY importance DESC, created_at DESC LIMIT 10",
     [userName]
   );
 
-  const memory = mem.rows.map(m => `User:${m.message}\nAI:${m.reply}`).join("\n");
+  const memoryText = mem.rows.map(m => m.content).join("\n");
+
+  // AI CALL
+  const ai = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENAI_KEY}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: `User Memory:\n${memoryText}` },
+        { role: "user", content: prompt }
+      ]
+    })
+  });
+
+  const d = await ai.json();
+  const reply = d.choices?.[0]?.message?.content || "No response";
+
+  // STORE RESPONSE
+  await pool.query(
+    "INSERT INTO memory(user_name,category,content) VALUES($1,$2,$3)",
+    [userName, "ai", reply]
+  );
+
+  // AUTO LEARN
+  if (prompt.toLowerCase().includes("my name is")) {
+    const name = prompt.split("is")[1]?.trim();
+
+    await pool.query(`
+      INSERT INTO users(user_name, profile)
+      VALUES($1,$2)
+      ON CONFLICT (user_name)
+      DO UPDATE SET profile = jsonb_set(users.profile, '{name}', to_jsonb($2::text))
+    `, [userName, name]);
+  }
+
+  res.json({ result: reply });
+});
+
+// ===== MEMORY AUTO CLASSIFIER =====
+app.post("/memory/auto", async (req, res) => {
+  const { userName, text } = req.body;
+
+  let category = "general";
+  let importance = 1;
+
+  if (text.includes("my name")) category = "identity", importance = 5;
+  if (text.includes("I like")) category = "preference", importance = 4;
+  if (text.includes("goal") || text.includes("I need")) category = "goal", importance = 5;
+
+  await pool.query(
+    "INSERT INTO memory(user_name,category,content,importance) VALUES($1,$2,$3,$4)",
+    [userName, category, text, importance]
+  );
+
+  res.json({ status: "stored" });
+});
+
+// ===== DECISION ENGINE =====
+app.post("/ai/decide", async (req, res) => {
+  const { userName, goal } = req.body;
 
   const ai = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -60,21 +146,49 @@ app.post("/ai", async (req, res) => {
     body: JSON.stringify({
       model: "gpt-4o-mini",
       messages: [
-        { role: "system", content: memory },
-        { role: "user", content: prompt }
+        { role: "system", content: "You are a decision-making AI" },
+        { role: "user", content: `Goal: ${goal}. Give next action.` }
       ]
     })
   });
 
   const d = await ai.json();
-  const reply = d.choices?.[0]?.message?.content || "No response";
+  const action = d.choices[0].message.content;
 
   await pool.query(
-    "INSERT INTO chats(user_name,message,reply) VALUES($1,$2,$3)",
-    [userName, prompt, reply]
+    "INSERT INTO decisions(user_name,goal,action) VALUES($1,$2,$3)",
+    [userName, goal, action]
   );
 
-  res.json({ result: reply });
+  res.json({ action });
+});
+
+// ===== AUTONOMOUS BRAIN =====
+app.post("/brain/start", (req, res) => {
+  const { userName, goal } = req.body;
+
+  (async () => {
+    while (true) {
+      const r = await fetch("http://localhost:10000/ai/decide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userName, goal })
+      });
+
+      const d = await r.json();
+
+      console.log("🧠 ACTION:", d.action);
+
+      await pool.query(
+        "INSERT INTO memory(user_name,category,content) VALUES($1,$2,$3)",
+        [userName, "action", d.action]
+      );
+
+      await new Promise(r => setTimeout(r, 5000));
+    }
+  })();
+
+  res.json({ status: "running" });
 });
 
 // ===== SEARCH =====
@@ -94,36 +208,35 @@ app.post("/search", async (req, res) => {
   res.json({ results });
 });
 
-// ===== LEADS SYSTEM (MONEY) =====
-app.post("/money/leads", async (req,res)=>{
- const query = req.body.query;
+// ===== LEADS SYSTEM =====
+app.post("/money/leads", async (req, res) => {
+  const query = req.body.query;
 
- const r = await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query));
- const html = await r.text();
+  const r = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query));
+  const html = await r.text();
 
- const results=[];
- const reg=/uddg=([^&"]+)/g;
- let m;
+  const results = [];
+  const reg = /uddg=([^&"]+)/g;
+  let m;
 
- while((m=reg.exec(html))){
-   const link = decodeURIComponent(m[1]);
-   results.push(link);
+  while ((m = reg.exec(html))) {
+    const link = decodeURIComponent(m[1]);
+    results.push(link);
 
-   await pool.query(
-     "INSERT INTO leads(query,link) VALUES($1,$2)",
-     [query, link]
-   );
+    await pool.query(
+      "INSERT INTO leads(query,link) VALUES($1,$2)",
+      [query, link]
+    );
 
-   if(results.length >= 10) break;
- }
+    if (results.length >= 10) break;
+  }
 
- res.json({results});
+  res.json({ results });
 });
 
-// ===== VIEW LEADS =====
-app.get("/money/leads", async (req,res)=>{
- const data = await pool.query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 50");
- res.json(data.rows);
+app.get("/money/leads", async (req, res) => {
+  const d = await pool.query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 50");
+  res.json(d.rows);
 });
 
 // ===== IMAGE AI =====
@@ -152,7 +265,7 @@ app.post("/analyze-image", async (req, res) => {
   res.json({ result: d.choices[0].message.content });
 });
 
-// ===== FILE UPLOAD =====
+// ===== FILES =====
 const upload = multer({ dest: "uploads/" });
 
 app.post("/upload", upload.single("file"), (req, res) => {
@@ -163,7 +276,7 @@ app.get("/files", (req, res) => {
   fs.readdir("uploads", (e, f) => res.json(f || []));
 });
 
-// ===== AGENT ACTION =====
+// ===== AGENT AUTOMATION =====
 app.post("/agent/action", async (req, res) => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -180,49 +293,6 @@ app.post("/agent/action", async (req, res) => {
   res.json({ result: results.slice(0, 5) });
 });
 
-// ===== AUTONOMOUS AGENT LOOP =====
-let loops = {};
-
-app.post("/agent/auto", (req, res) => {
-  const { goal, id } = req.body;
-  loops[id] = true;
-
-  (async () => {
-    let context = "";
-    while (loops[id]) {
-      const ai = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_KEY}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          model: "gpt-4o-mini",
-          messages: [
-            { role: "system", content: "Autonomous agent" },
-            { role: "user", content: `Goal:${goal}\n${context}` }
-          ]
-        })
-      });
-
-      const d = await ai.json();
-      const step = d.choices?.[0]?.message?.content;
-
-      console.log(step);
-      context += step + "\n";
-
-      await new Promise(r => setTimeout(r, 5000));
-    }
-  })();
-
-  res.json({ status: "started" });
-});
-
-app.post("/agent/stop", (req, res) => {
-  loops[req.body.id] = false;
-  res.json({ status: "stopped" });
-});
-
 // ===== PAYMENTS =====
 app.post("/checkout", async (req, res) => {
   const s = await stripe.checkout.sessions.create({
@@ -231,7 +301,7 @@ app.post("/checkout", async (req, res) => {
     line_items: [{
       price_data: {
         currency: "usd",
-        product_data: { name: "AI Platform Pro" },
+        product_data: { name: "AI OS PRO" },
         unit_amount: 2000
       },
       quantity: 1
@@ -246,7 +316,7 @@ app.post("/checkout", async (req, res) => {
 // ===== HEALTH =====
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-// ===== START SERVER =====
+// ===== START =====
 app.listen(process.env.PORT || 10000, () => {
-  console.log("🚀 AI PLATFORM + MONEY SYSTEM RUNNING");
+  console.log("🚀 FULL AI OS RUNNING");
 });
