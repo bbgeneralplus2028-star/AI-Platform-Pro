@@ -18,7 +18,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
-// ===== INIT =====
+// ===== INIT TABLES =====
 (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS chats(
@@ -29,9 +29,18 @@ const pool = new Pool({
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS leads(
+      id SERIAL PRIMARY KEY,
+      query TEXT,
+      link TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
 })();
 
-// ===== AI =====
+// ===== AI CHAT =====
 app.post("/ai", async (req, res) => {
   const { prompt, userName } = req.body;
 
@@ -85,6 +94,38 @@ app.post("/search", async (req, res) => {
   res.json({ results });
 });
 
+// ===== LEADS SYSTEM (MONEY) =====
+app.post("/money/leads", async (req,res)=>{
+ const query = req.body.query;
+
+ const r = await fetch("https://html.duckduckgo.com/html/?q="+encodeURIComponent(query));
+ const html = await r.text();
+
+ const results=[];
+ const reg=/uddg=([^&"]+)/g;
+ let m;
+
+ while((m=reg.exec(html))){
+   const link = decodeURIComponent(m[1]);
+   results.push(link);
+
+   await pool.query(
+     "INSERT INTO leads(query,link) VALUES($1,$2)",
+     [query, link]
+   );
+
+   if(results.length >= 10) break;
+ }
+
+ res.json({results});
+});
+
+// ===== VIEW LEADS =====
+app.get("/money/leads", async (req,res)=>{
+ const data = await pool.query("SELECT * FROM leads ORDER BY created_at DESC LIMIT 50");
+ res.json(data.rows);
+});
+
 // ===== IMAGE AI =====
 app.post("/analyze-image", async (req, res) => {
   const { image } = req.body;
@@ -111,7 +152,7 @@ app.post("/analyze-image", async (req, res) => {
   res.json({ result: d.choices[0].message.content });
 });
 
-// ===== FILES =====
+// ===== FILE UPLOAD =====
 const upload = multer({ dest: "uploads/" });
 
 app.post("/upload", upload.single("file"), (req, res) => {
@@ -122,7 +163,7 @@ app.get("/files", (req, res) => {
   fs.readdir("uploads", (e, f) => res.json(f || []));
 });
 
-// ===== PLAYWRIGHT AGENT =====
+// ===== AGENT ACTION =====
 app.post("/agent/action", async (req, res) => {
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -139,7 +180,7 @@ app.post("/agent/action", async (req, res) => {
   res.json({ result: results.slice(0, 5) });
 });
 
-// ===== AUTONOMOUS LOOP =====
+// ===== AUTONOMOUS AGENT LOOP =====
 let loops = {};
 
 app.post("/agent/auto", (req, res) => {
@@ -182,7 +223,7 @@ app.post("/agent/stop", (req, res) => {
   res.json({ status: "stopped" });
 });
 
-// ===== STRIPE =====
+// ===== PAYMENTS =====
 app.post("/checkout", async (req, res) => {
   const s = await stripe.checkout.sessions.create({
     payment_method_types: ["card"],
@@ -190,7 +231,7 @@ app.post("/checkout", async (req, res) => {
     line_items: [{
       price_data: {
         currency: "usd",
-        product_data: { name: "AI Platform" },
+        product_data: { name: "AI Platform Pro" },
         unit_amount: 2000
       },
       quantity: 1
@@ -202,6 +243,10 @@ app.post("/checkout", async (req, res) => {
   res.json({ url: s.url });
 });
 
+// ===== HEALTH =====
+app.get("/health", (req, res) => res.json({ status: "ok" }));
+
+// ===== START SERVER =====
 app.listen(process.env.PORT || 10000, () => {
-  console.log("🚀 RUNNING");
+  console.log("🚀 AI PLATFORM + MONEY SYSTEM RUNNING");
 });
