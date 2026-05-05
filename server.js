@@ -169,7 +169,7 @@ app.post("/brain/start", (req, res) => {
 
   (async () => {
     while (true) {
-      const r = await fetch("http://localhost:10000/ai/decide", {
+      const r = await fetch(process.env.BASE_URL + "/ai/decide", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ userName, goal })
