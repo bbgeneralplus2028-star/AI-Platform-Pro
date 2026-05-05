@@ -2,65 +2,189 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI OS</title>
+<title>AI OS PRO</title>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 
 <style>
-body{background:#111;color:white;font-family:Arial}
-.panel{display:none}
-button,input,textarea{margin:5px}
+body { margin:0; background:#111; color:white; font-family:Arial }
+.sidebar { width:220px; height:100vh; background:#000; float:left }
+.sidebar button { width:100%; padding:10px; background:#111; color:white; border:none }
+.main { margin-left:220px; padding:10px }
+.panel { display:none }
+input,textarea { width:90%; margin:5px }
+video { width:100%; max-width:300px }
 </style>
 </head>
 
 <body>
 
-<button onclick="show('chat')">Chat</button>
-<button onclick="show('camera')">Camera</button>
-<button onclick="show('api')">API</button>
+<div class="sidebar">
+<button onclick="show('chat')">💬 Chat</button>
+<button onclick="show('search')">🌐 Search</button>
+<button onclick="show('leads')">💰 Leads</button>
+<button onclick="show('camera')">📷 Camera</button>
+<button onclick="show('qr')">🔳 QR</button>
+<button onclick="show('translate')">🌐 Translate</button>
+<button onclick="show('agents')">🤖 Agents</button>
+<button onclick="show('swarm')">🧠 Swarm</button>
+<button onclick="show('files')">📁 Files</button>
+<button onclick="show('api')">🧪 API</button>
+<button onclick="show('brain')">🧠 Brain</button>
+</div>
 
+<div class="main">
+
+<!-- CHAT -->
 <div id="chat" class="panel">
+<h3>Chat</h3>
 <input id="msg">
 <button onclick="send()">Send</button>
+<button onclick="voice()">🎤</button>
 <div id="chatBox"></div>
 </div>
 
+<!-- SEARCH -->
+<div id="search" class="panel">
+<input id="q"><button onclick="search()">Search</button>
+<div id="results"></div>
+<pre id="summary"></pre>
+</div>
+
+<!-- LEADS -->
+<div id="leads" class="panel">
+<h3>Lead Generator</h3>
+<input id="leadQuery" placeholder="e.g. real estate leads Dallas">
+<button onclick="getLeads()">Collect Leads</button>
+<button onclick="loadLeads()">View Leads</button>
+<div id="leadOut"></div>
+</div>
+
+<!-- CAMERA -->
 <div id="camera" class="panel">
-<video id="video" autoplay width="300"></video><br>
-<button onclick="startCam()">Start</button>
-<button onclick="snap()">Scan</button>
+<video id="video" autoplay></video><br>
+<button onclick="startCam()">Start Camera</button>
+<button onclick="snap()">Scan Item</button>
 <pre id="camOut"></pre>
 </div>
 
-<div id="api" class="panel">
-<select id="method">
-<option>POST</option>
-<option>GET</option>
+<!-- QR -->
+<div id="qr" class="panel">
+<select id="qrType">
+<option value="text">Text</option>
+<option value="url">URL</option>
+<option value="phone">Phone</option>
+<option value="gps">GPS</option>
 </select>
+<input id="qrText">
+<button onclick="makeQR()">Generate</button>
+<div id="qrOut"></div>
+</div>
+
+<!-- TRANSLATE -->
+<div id="translate" class="panel">
+<textarea id="t"></textarea>
+<button onclick="translate()">Translate</button>
+<pre id="tOut"></pre>
+</div>
+
+<!-- AGENTS -->
+<div id="agents" class="panel">
+<input id="task">
+<button onclick="runAgent()">Run Agent</button>
+<button onclick="startAuto()">Auto Agent</button>
+<button onclick="stopAuto()">Stop</button>
+<pre id="agentOut"></pre>
+</div>
+
+<!-- SWARM -->
+<div id="swarm" class="panel">
+<input id="goal">
+<button onclick="runSwarm()">Run Swarm</button>
+<pre id="swarmOut"></pre>
+</div>
+
+<!-- FILES -->
+<div id="files" class="panel">
+<input type="file" id="f">
+<button onclick="upload()">Upload</button>
+<button onclick="listFiles()">List</button>
+<div id="fileList"></div>
+</div>
+
+<!-- API -->
+<div id="api" class="panel">
+<select id="method"><option>POST</option><option>GET</option></select>
 <input id="url" value="/ai">
 <textarea id="body">{ "prompt":"Hello","userName":"William" }</textarea>
 <button onclick="api()">Send</button>
 <pre id="out"></pre>
 </div>
 
-<script>
-let userName="William";
+<!-- BRAIN -->
+<div id="brain" class="panel">
+<textarea id="brainCode"></textarea>
+<button onclick="runBrain()">Inject</button>
+</div>
 
+</div>
+
+<script>
+let userName = "William";
+
+// NAV
 function show(id){
  document.querySelectorAll(".panel").forEach(p=>p.style.display="none");
  document.getElementById(id).style.display="block";
 }
 
+// CHAT
 async function send(){
- const r=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
+ const r = await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
  body:JSON.stringify({prompt:msg.value,userName})});
- const d=await r.json();
- chatBox.innerHTML+=`<div>${msg.value}</div><div>${d.result}</div>`;
+ const d = await r.json();
+
+ chatBox.innerHTML += `<div>🧑 ${msg.value}</div><div>🤖 ${d.result}</div>`;
+ speechSynthesis.speak(new SpeechSynthesisUtterance(d.result));
 }
 
+// VOICE
+function voice(){
+ const r=new (webkitSpeechRecognition||SpeechRecognition)();
+ r.start();
+ r.onresult=e=>{msg.value=e.results[0][0].transcript;send();}
+}
+
+// SEARCH
+async function search(){
+ const r = await fetch("/search",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({query:q.value})});
+ const d = await r.json();
+
+ results.innerHTML="";
+ d.results.forEach(x=>{
+   results.innerHTML += `<div>${x.link}</div>`;
+ });
+}
+
+// LEADS
+async function getLeads(){
+ const r = await fetch("/money/leads",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({query:leadQuery.value})});
+ const d = await r.json();
+ leadOut.innerHTML = d.results.join("<br>");
+}
+
+async function loadLeads(){
+ const r = await fetch("/money/leads");
+ const d = await r.json();
+ leadOut.innerHTML = d.map(x=>x.link).join("<br>");
+}
+
+// CAMERA
 async function startCam(){
- const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
- video.srcObject=stream;
+ const stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+ video.srcObject = stream;
 }
 
 async function snap(){
@@ -79,13 +203,79 @@ async function snap(){
  camOut.innerText=d.result;
 }
 
+// QR
+function makeQR(){
+ let val=qrText.value;
+ if(qrType.value==="phone") val="tel:"+val;
+ if(qrType.value==="gps") val="geo:"+val;
+
+ qrOut.innerHTML=`<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(val)}">`;
+}
+
+// TRANSLATE
+async function translate(){
+ const r=await fetch("/ai",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({prompt:"Translate to English:\n"+t.value,userName})});
+ const d=await r.json();
+ tOut.innerText=d.result;
+}
+
+// AGENT
+async function runAgent(){
+ const r=await fetch("/agent/action",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({task:task.value})});
+ const d=await r.json();
+ agentOut.innerText=JSON.stringify(d,null,2);
+}
+
+// AUTO AGENT
+let agentId="1";
+
+async function startAuto(){
+ await fetch("/agent/auto",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({goal:task.value,id:agentId})});
+}
+
+async function stopAuto(){
+ await fetch("/agent/stop",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({id:agentId})});
+}
+
+// SWARM
+async function runSwarm(){
+ const r=await fetch("/swarm",{method:"POST",headers:{"Content-Type":"application/json"},
+ body:JSON.stringify({goal:goal.value})});
+ const d=await r.json();
+ swarmOut.innerText=JSON.stringify(d,null,2);
+}
+
+// FILES
+async function upload(){
+ const fd=new FormData();
+ fd.append("file",f.files[0]);
+ await fetch("/upload",{method:"POST",body:fd});
+}
+
+async function listFiles(){
+ const r=await fetch("/files");
+ const d=await r.json();
+ fileList.innerHTML=d.join("<br>");
+}
+
+// API
 async function api(){
  const r=await fetch(url.value,{
-  method:method.value,
-  headers:{"Content-Type":"application/json"},
-  body:method.value==="POST"?body.value:null
+ method:method.value,
+ headers:{"Content-Type":"application/json"},
+ body:method.value==="POST"?body.value:null
  });
  out.innerText=await r.text();
+}
+
+// BRAIN
+function runBrain(){
+ try{ eval(brainCode.value); alert("AI upgraded"); }
+ catch(e){ alert(e.message); }
 }
 </script>
 
