@@ -317,6 +317,345 @@ app.post("/checkout", async (req, res) => {
 app.get("/health", (req, res) => res.json({ status: "ok" }));
 
 // ===== START =====
+// ===============================
+// AI CLOSER SYSTEM
+// ===============================
+
+// SALES TABLE
+(async()=>{
+
+await pool.query(`
+CREATE TABLE IF NOT EXISTS sales(
+ id SERIAL PRIMARY KEY,
+ user_name TEXT,
+ lead TEXT,
+ email TEXT,
+ status TEXT DEFAULT 'new',
+ conversation TEXT DEFAULT '',
+ last_contact TIMESTAMP,
+ deal_value INT DEFAULT 0,
+ created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+`);
+
+})();
+
+// ===============================
+// GENERATE SALES MESSAGE
+// ===============================
+app.post("/sales/message", async(req,res)=>{
+
+ const { lead, service } = req.body;
+
+ try{
+
+ const ai = await fetch("https://api.openai.com/v1/chat/completions",{
+   method:"POST",
+   headers:{
+     Authorization:`Bearer ${process.env.OPENAI_KEY}`,
+     "Content-Type":"application/json"
+   },
+   body:JSON.stringify({
+     model:"gpt-4o-mini",
+     messages:[
+       {
+         role:"system",
+         content:"You are a professional sales closer."
+       },
+       {
+         role:"user",
+         content:`
+Create a short persuasive outreach message.
+
+Service:
+${service}
+
+Lead:
+${lead}
+`
+       }
+     ]
+   })
+ });
+
+ const d = await ai.json();
+
+ res.json({
+   message:d.choices?.[0]?.message?.content || "Hello"
+ });
+
+ }catch(e){
+   res.json({error:e.message});
+ }
+
+});
+
+// ===============================
+// HANDLE REPLIES
+// ===============================
+app.post("/sales/reply", async(req,res)=>{
+
+ const { email, reply } = req.body;
+
+ try{
+
+ // LOAD SALES RECORD
+ const sale = await pool.query(
+   "SELECT * FROM sales WHERE email=$1 LIMIT 1",
+   [email]
+ );
+
+ const convo = sale.rows[0]?.conversation || "";
+
+ // AI RESPONSE
+ const ai = await fetch("https://api.openai.com/v1/chat/completions",{
+   method:"POST",
+   headers:{
+     Authorization:`Bearer ${process.env.OPENAI_KEY}`,
+     "Content-Type":"application/json"
+   },
+   body:JSON.stringify({
+     model:"gpt-4o-mini",
+     messages:[
+       {
+         role:"system",
+         content:`
+You are an AI sales closer.
+
+Your goal:
+- build trust
+- answer objections
+- close the sale
+- move toward payment
+`
+       },
+       {
+         role:"user",
+         content:`
+Conversation:
+${convo}
+
+Lead Reply:
+${reply}
+`
+       }
+     ]
+   })
+ });
+
+ const d = await ai.json();
+
+ const response =
+ d.choices?.[0]?.message?.content || "Thanks for the reply.";
+
+ // SAVE CONVERSATION
+ await pool.query(`
+ UPDATE sales
+ SET
+ conversation = conversation || $1,
+ last_contact = NOW(),
+ status='engaged'
+ WHERE email=$2
+ `,
+ [`\nLEAD:${reply}\nAI:${response}`, email]);
+
+ res.json({
+   response
+ });
+
+ }catch(e){
+   res.json({error:e.message});
+ }
+
+});
+
+// ===============================
+// AUTO CLOSE DEAL
+// ===============================
+app.post("/sales/close", async(req,res)=>{
+
+ const { email, amount, service } = req.body;
+
+ try{
+
+ const s = await stripe.checkout.sessions.create({
+   payment_method_types:["card"],
+   mode:"payment",
+   line_items:[{
+     price_data:{
+       currency:"usd",
+       product_data:{
+         name:service || "AI Service"
+       },
+       unit_amount:amount || 10000
+     },
+     quantity:1
+   }],
+   success_url:process.env.BASE_URL,
+   cancel_url:process.env.BASE_URL
+ });
+
+ // UPDATE SALE
+ await pool.query(`
+ UPDATE sales
+ SET
+ status='payment_sent',
+ deal_value=$1
+ WHERE email=$2
+ `,[amount,email]);
+
+ res.json({
+   payment_url:s.url
+ });
+
+ }catch(e){
+   res.json({error:e.message});
+ }
+
+});
+
+// ===============================
+// AUTO FOLLOW UPS
+// ===============================
+app.post("/sales/followups", async(req,res)=>{
+
+ try{
+
+ const leads = await pool.query(`
+ SELECT * FROM sales
+ WHERE
+ status='contacted'
+ AND last_contact < NOW() - INTERVAL '2 days'
+ LIMIT 20
+ `);
+
+ for(let l of leads.rows){
+
+   const body = `
+Just checking in.
+
+Are you still interested in learning more?
+`;
+
+   await fetch(process.env.BASE_URL + "/agent/execute",{
+     method:"POST",
+     headers:{
+       "Content-Type":"application/json"
+     },
+     body:JSON.stringify({
+       action:"send_email",
+       data:{
+         to:l.email,
+         subject:"Following up",
+         body
+       }
+     })
+   });
+
+   await pool.query(`
+   UPDATE sales
+   SET last_contact=NOW()
+   WHERE id=$1
+   `,[l.id]);
+
+ }
+
+ res.json({
+   status:"followups sent"
+ });
+
+ }catch(e){
+   res.json({error:e.message});
+ }
+
+});
+
+// ===============================
+// FULL AI SALES LOOP
+// ===============================
+app.post("/sales/auto", (req,res)=>{
+
+ const { service } = req.body;
+
+ (async()=>{
+
+   while(true){
+
+     try{
+
+       // LOAD NEW LEADS
+       const leads = await pool.query(`
+       SELECT * FROM sales
+       WHERE status='new'
+       LIMIT 5
+       `);
+
+       for(let l of leads.rows){
+
+         // GENERATE MESSAGE
+         const msg = await fetch(
+           process.env.BASE_URL + "/sales/message",
+           {
+             method:"POST",
+             headers:{
+               "Content-Type":"application/json"
+             },
+             body:JSON.stringify({
+               lead:l.lead,
+               service
+             })
+           }
+         );
+
+         const m = await msg.json();
+
+         // SEND EMAIL
+         await fetch(
+           process.env.BASE_URL + "/agent/execute",
+           {
+             method:"POST",
+             headers:{
+               "Content-Type":"application/json"
+             },
+             body:JSON.stringify({
+               action:"send_email",
+               data:{
+                 to:l.email,
+                 subject:"Quick Question",
+                 body:m.message
+               }
+             })
+           }
+         );
+
+         // UPDATE STATUS
+         await pool.query(`
+         UPDATE sales
+         SET
+         status='contacted',
+         last_contact=NOW()
+         WHERE id=$1
+         `,[l.id]);
+
+       }
+
+       console.log("🤖 SALES LOOP RUNNING");
+
+     }catch(e){
+       console.log(e.message);
+     }
+
+     await new Promise(r=>setTimeout(r,60000));
+
+   }
+
+ })();
+
+ res.json({
+   status:"AI SALES SYSTEM RUNNING"
+ });
+
+});
 app.listen(process.env.PORT || 10000, () => {
   console.log("🚀 FULL AI OS RUNNING");
 });
